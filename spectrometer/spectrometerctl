@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import socket
+import json
+
+from spectrometer import Spectrometer
+from spectrometerctl import SpectrometerCtl
+
+
+class Options:
+    def __init__(self):
+        self.verbose = False
+        self.recursive = False
+        self.cmd = None
+        self.args = []
+
+    @classmethod
+    def parse(cls, argv):
+        opts = cls()
+        n = len(argv)
+        i = 0
+        while i < n:
+            arg = argv[i]
+            if not arg.startswith("-"):
+                opts.args += [arg]
+            else:
+                if arg == '-v' or arg == '--verbose':
+                    opts.verbose = True
+                elif arg == '-R' or arg == '--recursive':
+                    opts.recursive = True
+                else:
+                    print(f"Invalid option '{arg}'")
+                    cls.usage()
+            i += 1
+
+        if len(opts.args) < 1:
+            cls.usage()
+        opts.cmd = opts.args[0]
+        opts.args = opts.args[1:]
+
+        cmds = ['status', 'ls', 'cp', 'rm', 'capture', 'stop']
+        if not opts.cmd in cmds:
+            print(f"Invalid command '{opts.cmd}'")
+            cls.usage()
+
+        return opts
+
+    @classmethod
+    def usage(cls):
+        print("Usage: spectrometerctl [opts] <cmd> <args>")
+        print("  Options:")
+        print("     -v, --verbose: Print additional information")
+        print("     -R, --recursive: Applies to ls and rm sub commands")
+        print("  Commands:")
+        print("    status: get current status")
+        print("    ls:     list files")
+        print("    cp:     copy files")
+        print("    rm:     remove files")
+        exit(2)
+
+
+def run(opts):
+    spectrometer.connect()
+    if opts.cmd == 'status':
+        pass
+    elif opts.cmd == 'ls':
+        return run_ls(opts)
+    elif opts.cmd == 'cp':
+        return run_cp(opts)
+    elif opts.cmd == 'rm':
+        return run_rm(opts)
+    elif opts.cmd == 'capture':
+        return run_capture(opts)
+    elif opts.cmd == 'stop':
+        return run_stop(opts)
+
+
+def run_ls(opts):
+    path = "/imgs"
+    recursive = False
+    if len(opts.args) >= 1:
+        path = opts.args[0]
+        recursive = opts.recursive
+
+    r, err = spectrometer.list_files(path, recursive=recursive, retry=-1)
+    if err is not None:
+        return err
+
+    for e in r:
+        if e.dir:
+            print(f"{e.name}/")
+        else:
+            print(f"{e.name}")
+
+
+def run_cp(opts):
+    srcs = opts.args[:-1]
+    dst = opts.args[-1]
+
+    for src in srcs:
+        err = spectrometer.copy_files(src, dst, verbose=True, retry=-1)
+        if err is not None:
+            return err
+
+
+def run_rm(opts):
+    filename = opts.args[0]
+    success, err = spectrometer.delete_file(filename, recursive=opts.recursive)
+    return err
+
+
+def run_capture(opts):
+    if len(opts.args) < 1:
+        return "missing required configuration file"
+
+    config_file = opts.args[0]
+    with open(config_file) as f:
+        config_content = json.load(f)
+
+    config = config_content.get('config')
+    gps_monitor = config_content.get('gpsMonitor')
+
+    if gps_monitor is not None:
+        print("Configuring GPS monitor")
+        _, err = spectrometer.gps_monitor(gps_monitor)
+        if err is not None:
+            return err
+    else:
+        print("Disabling GPS monitor")
+        _, err = spectrometer.gps_monitor({'enabled': False})
+        if err is not None:
+            return err
+
+    if config is not None:
+        print("Configuring capture parameters")
+        _, err = spectrometer.configure(config)
+        if err is not None:
+            return err
+
+    folder, err = spectrometer.start_capture()
+    if err is not None:
+        return err
+    print(f"Capturing in folder: {folder}")
+
+
+def run_stop(opts):
+    success, err = spectrometer.stop_capture()
+    return err
+
+
+# ----------------------------------------------------------------------------
+
+if sys.version_info.major < 3 or sys.version_info.minor < 7:
+    print("Python 3.7 or later required")
+    print("Current version: " + sys.version)
+    exit(2)
+
+opts = Options.parse(sys.argv[1:])
+spectrometer = SpectrometerCtl(log_cmd=opts.verbose)
+
+try:
+    err = run(opts)
+    if err is not None:
+        print(f"Error: {err.__class__.__name__} {err}")
+
+except (InterruptedError, KeyboardInterrupt):
+    print("Aborted")
