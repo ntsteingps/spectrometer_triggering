@@ -8,13 +8,8 @@ retrieve recorded data.
 
 ## Install
 
-1. Clone the repository in the desired location on the target system. When
-   cloning to a production system, be sure to use a revocable deploy key with
-   minimum access right.
-    ```bash
-    git clone git@github.com:maargenton/caltech-spectrometer.git spectrometer
-    cd spectrometer
-    ```
+1. Clone the repository in the desired location on the target system.
+
 2. Create a symbolic link to the main command in one of the system paths, e.g.:
     ```sh
     ln -fs $(pwd)/spectrometer/spectrometerctl /usr/local/bin/spectrometerctl
